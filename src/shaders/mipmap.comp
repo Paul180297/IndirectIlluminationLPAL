@@ -1,0 +1,24 @@
+#version 450
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+layout(rgba32f, binding = 0) readonly uniform image3D u_inputImage;
+layout(rgba32f, binding = 1) writeonly uniform image3D u_outputImage;
+
+int offsetX[8] = int[](0, 1, 0, 1, 0, 1, 0, 1);
+int offsetY[8] = int[](0, 0, 1, 1, 0, 0, 1, 1);
+int offsetZ[8] = int[](0, 0, 0, 0, 1, 1, 1, 1);
+
+void main(void) {
+    const ivec3 outCoords = ivec3(gl_GlobalInvocationID.xyz);
+    
+    const ivec3 inCoords = outCoords * 2;
+    vec4 result = vec4(0.0);
+    for (int i = 0; i < 8; i++) {
+        ivec3 coords = inCoords + ivec3(offsetX[i], offsetY[i], offsetZ[i]);
+        result += imageLoad(u_inputImage, coords);
+    }
+    result /= 8;
+
+    imageStore(u_outputImage, outCoords, result);
+}

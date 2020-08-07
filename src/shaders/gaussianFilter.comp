@@ -1,0 +1,96 @@
+#version 450
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+layout(rgba32f, binding = 0) readonly uniform image3D u_radDensImage;
+layout(rgba32f, binding = 1) coherent uniform image3D u_outImage;
+layout(rgba32f, binding = 2) coherent uniform image3D u_bufferImage;
+
+uniform ivec3 u_lodTexSize;
+uniform ivec3 u_marginSize;
+
+uniform int u_LOD;
+uniform int u_maxLOD;
+uniform int u_kernelSize;
+uniform samplerBuffer u_gaussKernel;
+
+vec4 gaussian(ivec3 writeCoords) {
+    const int offset = (u_kernelSize - 1) / 2;
+
+    // X-axis
+    if (all(lessThan(writeCoords, u_lodTexSize)) &&
+        all(greaterThanEqual(writeCoords, ivec3(0)))) {
+        vec4 sumValue = vec4(0.0);
+        for (int k = 0; k < u_kernelSize; k++) {
+            const int delta = k - offset;
+            const int nx = writeCoords.x + delta;
+            if (nx >= 0 && nx < u_lodTexSize.x) {
+                const ivec3 readCoords = ivec3(nx, writeCoords.y, writeCoords.z);
+                const vec4 imageVal = imageLoad(u_radDensImage, readCoords);
+                const float weight = texelFetch(u_gaussKernel, k).x;
+                sumValue += weight * imageVal;
+            }
+        }
+        const vec4 result = sumValue;
+        imageStore(u_bufferImage, writeCoords, result);
+    }
+    memoryBarrierImage();
+    barrier();
+
+    // Y-axis
+    if (all(lessThan(writeCoords, u_lodTexSize)) &&
+        all(greaterThanEqual(writeCoords, ivec3(0)))) {
+        vec4 sumValue = vec4(0.0);
+        for (int k = 0; k < u_kernelSize; k++) {
+            const int delta = k - offset;
+            const int ny = writeCoords.y + delta;
+            if (ny >= 0 && ny < u_lodTexSize.y) {
+                const ivec3 readCoords = ivec3(writeCoords.x, ny, writeCoords.z);
+                const vec4 imageVal = imageLoad(u_bufferImage, readCoords);
+                const float weight = texelFetch(u_gaussKernel, k).x;
+                sumValue += weight * imageVal;
+            }
+        }
+        const vec4 result = sumValue;
+        imageStore(u_outImage, writeCoords, result);
+    }
+    memoryBarrierImage();
+    barrier();
+
+    // Z-axis
+    if (all(lessThan(writeCoords, u_lodTexSize)) &&
+        all(greaterThanEqual(writeCoords, ivec3(0)))) {
+        vec4 sumValue = vec4(0.0);
+        for (int k = 0; k < u_kernelSize; k++) {
+            const int delta = k - offset;
+            const int nz = writeCoords.z + delta;
+            if (nz >= 0 && nz < u_lodTexSize.z) {
+                const ivec3 readCoords = ivec3(writeCoords.x, writeCoords.y, nz);
+                const vec4 imageVal = imageLoad(u_outImage, readCoords);
+                const float weight = texelFetch(u_gaussKernel, k).x;
+                sumValue += weight * imageVal;
+            }
+        }
+        const vec4 result = sumValue;
+        imageStore(u_bufferImage, writeCoords, result);
+    }
+    memoryBarrierImage();
+    barrier();
+
+    return imageLoad(u_bufferImage, writeCoords);
+}
+
+void main(void) {
+    const ivec3 writeCoords = ivec3(gl_GlobalInvocationID.xyz);
+
+    vec4 value;
+    if (u_LOD == 0) {
+        value = imageLoad(u_radDensImage, writeCoords);
+    } else {
+        value = gaussian(writeCoords);
+    }
+
+    if (all(lessThan(writeCoords, u_lodTexSize)) && all(greaterThanEqual(writeCoords, ivec3(0)))) {
+        imageStore(u_outImage, writeCoords, value);
+    }
+}

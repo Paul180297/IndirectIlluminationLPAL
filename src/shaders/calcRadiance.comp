@@ -1,0 +1,127 @@
+#version 450
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(r32f, binding = 0) readonly uniform image3D u_densityImage;
+layout(rgba32f, binding = 1) writeonly uniform image3D u_radDensImage;
+
+layout(binding = 2) uniform sampler3D u_emissionTex;
+
+uniform int u_type;
+
+uniform vec3 u_lightLe;
+uniform vec3 u_lightPos;
+
+uniform vec3 u_emissionColor;
+uniform vec3 u_albedo;
+
+uniform vec3 u_cubeCorners[8];
+uniform ivec3 u_marginTexSize;
+
+const int NO_EMISSION  = 0;
+const int WITH_EMISSION = 1;
+
+const float PI = 3.14159265358979323846264338327950288;
+const float INV_FOUR_PI = 1.0 / (4.0 * PI);
+const float EPS = 1.0e-8;
+
+vec4 calcRadDens (ivec3 writeCoords) {
+    vec4 res = vec4(0.0);
+
+    vec3 dx = (u_cubeCorners[1] - u_cubeCorners[0]) / float(u_marginTexSize.x);
+    vec3 dy = (u_cubeCorners[2] - u_cubeCorners[0]) / float(u_marginTexSize.y);
+    vec3 dz = (u_cubeCorners[3] - u_cubeCorners[0]) / float(u_marginTexSize.z);
+    vec3 originTexelPosWorld = u_cubeCorners[0] + 0.5f * (dx + dy + dz);
+
+    vec3 Ex = normalize(dx);
+    vec3 Ey = normalize(dy);
+    vec3 Ez = normalize(dz);
+
+    float Lx = length(u_cubeCorners[1] - u_cubeCorners[0]);
+    float Ly = length(u_cubeCorners[2] - u_cubeCorners[0]);
+    float Lz = length(u_cubeCorners[3] - u_cubeCorners[0]);
+
+    int dataPos = 0;
+
+    const float d = imageLoad(u_densityImage, writeCoords).x;
+
+    // Skip if voxel has a tiny density
+    if (d > EPS) {
+        vec3 sigmaS = u_albedo * d;
+        vec3 sigmaA = d - sigmaS;
+        vec3 sigmaT = sigmaS + sigmaA;
+
+        vec3 texelPosWorld = originTexelPosWorld + writeCoords.x * dx +
+                                                   writeCoords.y * dy +
+                                                   writeCoords.z * dz;
+        float lr = length(u_lightPos - texelPosWorld);
+
+        // transmittance along light ray
+        int numLightSamples = int(u_marginTexSize.y);
+        float lScale = lr / numLightSamples;
+        vec3 lDir = normalize(u_lightPos - texelPosWorld) * lScale;
+        vec3 lSamplePos = texelPosWorld + lDir;
+        vec3 lightT = vec3(1.0);
+        for (int i = 0; i < numLightSamples; i++) {
+            // normalize coordinates
+            float lNormPosX = dot(lSamplePos - u_cubeCorners[0], Ex) / Lx;
+            float lNormPosY = dot(lSamplePos - u_cubeCorners[0], Ey) / Ly;
+            float lNormPosZ = dot(lSamplePos - u_cubeCorners[0], Ez) / Lz;
+
+            if (lNormPosX < 0.0f || lNormPosY < 0.0f || lNormPosZ < 0.0f ||
+                lNormPosX > 1.0f || lNormPosY > 1.0f || lNormPosZ > 1.0f) {
+                break;
+            }
+
+            int lcol = int(floor(lNormPosX * (u_marginTexSize.x - 1)));
+            int lrow = int(floor(lNormPosY * (u_marginTexSize.y - 1)));
+            int ldep = int(floor(lNormPosZ * (u_marginTexSize.z - 1)));
+
+            ivec3 readCoords = ivec3(lcol, lrow, ldep);
+            const float ld = imageLoad(u_densityImage, readCoords).x;
+            if (ld > EPS) {
+                vec3 lSigmaS = u_albedo * ld;
+                vec3 lSigmaA = ld - lSigmaS;
+                vec3 lSigmaT = lSigmaS + lSigmaA;
+                
+                lightT *= exp(-lScale * lSigmaT);
+            }
+            if (all(lessThan(lightT, vec3(0.0001)))) { break; }
+
+            lSamplePos += lDir;
+        }
+
+        res.x += u_albedo.x * sigmaT.x * u_lightLe.x * lightT.x / (EPS + lr * lr);
+        res.y += u_albedo.y * sigmaT.y * u_lightLe.y * lightT.y / (EPS + lr * lr);
+        res.z += u_albedo.z * sigmaT.z * u_lightLe.z * lightT.z / (EPS + lr * lr);
+        if (u_type == WITH_EMISSION) {
+            const vec3 readUVW = vec3(writeCoords.x, writeCoords.y, writeCoords.z) / (u_marginTexSize - ivec3(1));
+            vec3 emissionVal = texture(u_emissionTex, readUVW).xyz;
+
+            vec3 emissionColor = u_emissionColor;
+            res.x += emissionColor.x * emissionVal.x;
+            res.y += emissionColor.y * emissionVal.y;
+            res.z += emissionColor.z * emissionVal.z;
+        }        
+    } else {
+        if (u_type == WITH_EMISSION) {
+            const vec3 readUVW = vec3(writeCoords.x, writeCoords.y, writeCoords.z) / (u_marginTexSize - ivec3(1));
+            vec3 emissionVal = texture(u_emissionTex, readUVW).xyz;
+
+            vec3 emissionColor = u_emissionColor;
+            res.x += emissionColor.x * emissionVal.x;
+            res.y += emissionColor.y * emissionVal.y;
+            res.z += emissionColor.z * emissionVal.z;
+        }
+    }
+    res.xyz *= INV_FOUR_PI; // scattering denominator
+    res.w = d; // density for the 4th component
+    return res;
+}
+
+void main(void) {
+    const ivec3 writeCoords = ivec3(gl_GlobalInvocationID.xyz);
+    
+    vec4 val = calcRadDens(writeCoords);
+
+    imageStore(u_radDensImage, writeCoords, val);
+}
