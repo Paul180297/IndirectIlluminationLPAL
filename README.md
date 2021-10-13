@@ -3,7 +3,7 @@ Volume Indirect Illumination using Layered Polygonal Area Lights
 
 <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png" /></a><br />
 
-This is an official implementation of the paper "[Real-time Indirect Illumination of Heterogeneous Emissive Volumes using Layered Polygonal Area Lights](http://tatsy.github.io/projects/lpal19/)". For more details, please visit our [project page](http://tatsy.github.io/projects/lpal19/)!
+This is an official implementation of the paper "[Real-time Indirect Illumination of Heterogeneous Emissive Volumes using Layered Polygonal Area Lights](http://tatsy.github.io/projects/kuge2019lpal/)". For more details, please visit our [project page](http://tatsy.github.io/projects/kuge2019lpal/)!
 
 # Build & Run
 
